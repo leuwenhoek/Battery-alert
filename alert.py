@@ -1,75 +1,67 @@
-from plyer import notification
+from win11toast import toast
 import psutil
 import time
 
-class Battery_notify:
+class BatteryMonitor:
     def __init__(self):
-        self.full_notified = False
         self.low_notified = False
-        pass
+        self.full_notified = False
+        self.last_low_notify = 0
+        self.last_full_notify = 0
+        self.cooldown = 15 * 60
 
     def get_battery_info(self):
         battery = psutil.sensors_battery()
-        percent = battery.percent
-        is_plugged = battery.power_plugged
-
-        parsed_data = {
-            "Percentage" : percent,
-            "Is_plugged" : is_plugged
+        if battery is None:
+            return None
+        return {
+            "percent": battery.percent,
+            "plugged": battery.power_plugged
         }
 
-        return parsed_data
-
     def process(self):
-
-        """
-            if battery_percentage <= 40% and not charging then:
-                alert user to start charging
-            
-            if battery_percentage >=80% and charging then:
-                alert user to stop charging
-        """
-
         data = self.get_battery_info()
+        if not data:
+            return None
 
-        if data['Percentage'] <= 40 and data['Is_plugged'] == False:
-            if not self.low_notified:
+        percent = data['percent']
+        is_plugged = data['plugged']
+        now = time.time()
+
+        if percent <= 40 and not is_plugged:
+            if (not self.low_notified) or (now - self.last_low_notify > self.cooldown):
                 self.low_notified = True
-                self.full_notified = False
-            return [f'''{data['Percentage']}% battery is left.
-Charge the device your device for better battery Health.''',"Charge your device"]
-
-        elif data['Percentage'] >= 80 and data['Is_plugged'] == True:
-            if not self.full_notified:
-                self.full_notified = True
-                self.low_notified = False
-            return [f'''{data['Percentage']}% battery is left.
-Remove the charger your device for better battery Health.''',"Remove your device from charge"]
-        
-        if data['Percentage'] > 40:
+                self.last_low_notify = now
+                return {
+                    "title": "Battery Low (Health Alert)",
+                    "msg": f"Battery is at {percent}%. Please plug in your charger."
+                }
+        else:
             self.low_notified = False
-        if data['Percentage'] < 80:
+            self.last_low_notify = 0
+
+        if percent >= 80 and is_plugged:
+            if (not self.full_notified) or (now - self.last_full_notify > self.cooldown):
+                self.full_notified = True
+                self.last_full_notify = now
+                return {
+                    "title": "Battery Charged (Health Alert)",
+                    "msg": f"Battery is at {percent}%. Remove the charger."
+                }
+        else:
             self.full_notified = False
+            self.last_full_notify = 0
 
-    def Alert(self,message_):
-        if message_:
-            verdic = message_[1]
-            notification.notify(
-                title = verdic,
-                message = message_[0],
-                timeout = 5
-            )
+        return None
 
-    def run_bg(self):
+    def run(self):
+        print("Monitoring Windows Battery (Press Ctrl+C to stop)...")
         while True:
-            self.Alert(self.process())
-            time.sleep(10)
-
-
-def main():
-    battery = Battery_notify()
-    battery.run_bg()
-    return 0
+            alert_data = self.process()
+            if alert_data:
+                toast(alert_data['title'], alert_data['msg'])
+            time.sleep(5)
 
 if __name__ == "__main__":
-    main()
+    monitor = BatteryMonitor()
+    monitor.run()
